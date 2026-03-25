@@ -2,7 +2,7 @@ services:
   postgres:
     image: postgres:15
     container_name: postgres
-    restart: always
+    restart: unless-stopped
     environment:
       POSTGRES_USER: postgres
       POSTGRES_PASSWORD: password
@@ -15,7 +15,7 @@ services:
   pgadmin:
     image: dpage/pgadmin4:latest
     container_name: pgadmin
-    restart: always
+    restart: unless-stopped
     environment:
       PGADMIN_DEFAULT_EMAIL: "admin@admin.com"
       PGADMIN_DEFAULT_PASSWORD: "admin"
@@ -27,6 +27,7 @@ services:
   minio:
     image: minio/minio:latest
     container_name: minio
+    restart: unless-stopped
     environment:
       MINIO_ROOT_USER: minioadmin
       MINIO_ROOT_PASSWORD: minioadmin
@@ -36,7 +37,15 @@ services:
     command: server /data --console-address ":9001"
     volumes:
       - minio_data:/data
-
+      
+  ingest:
+    build:
+      context: .
+      dockerfile: Dockerfile.ingest
+    depends_on:
+      - minio
+    restart: "no"
+    
 volumes:
   postgres_data:
   minio_data:
