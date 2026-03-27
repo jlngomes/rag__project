@@ -4,36 +4,49 @@ from io import BytesIO
 
 client = Minio(
     "minio:9000",
-    access_key="minio",
-    secret_key="minio123",
+    access_key="minioadmin",
+    secret_key="minioadmin",
     secure=False
 )
 
-bucket = "csgo.datalake"
+bucket = "csgodatalake"
 
-# baixar bronze
-response = client.get_object(
-    bucket,
-    "bronze/damage.csv"
-)
+# listar arquivos bronze
+objects = client.list_objects(bucket, prefix="bronze/", recursive=True)
 
-df = pd.read_csv(response)
+for obj in objects:
 
-# tratamento simples
-df = df.dropna()
+    if not obj.object_name.endswith(".csv"):
+        continue
 
-df.columns = df.columns.str.lower()
+    print("Processing:", obj.object_name)
 
-# salvar silver
-buffer = BytesIO()
-df.to_parquet(buffer, index=False)
-buffer.seek(0)
+    response = client.get_object(bucket, obj.object_name)
 
-client.put_object(
-    bucket,
-    "silver/damage_clean.parquet",
-    buffer,
-    length=buffer.getbuffer().nbytes
-)
+    part = 0
 
-print("Silver dataset created")
+    for chunk in pd.read_csv(BytesIO(response.read()), chunksize=100000):
+
+        # limpeza simples
+        chunk = chunk.dropna()
+        chunk.columns = chunk.columns.str.lower()
+
+        # salvar parquet
+        buffer = BytesIO()
+        chunk.to_parquet(buffer, index=False)
+        buffer.seek(0)
+
+        silver_name = obj.object_name.replace(
+            "bronze/", "silver/"
+        ).replace(".csv", f"_part{part}.parquet")
+
+        client.put_object(
+            bucket,
+            silver_name,
+            buffer,
+            length=buffer.getbuffer().nbytes
+        )
+
+        part += 1
+
+print("Silver datasets created")

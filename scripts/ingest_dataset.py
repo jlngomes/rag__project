@@ -17,7 +17,7 @@ client = Minio(
     secure=False
 )
 
-bucket = "csgo.datalake"
+bucket = "csgodatalake"
 
 if not client.bucket_exists(bucket):
     client.make_bucket(bucket)

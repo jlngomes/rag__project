@@ -44,7 +44,20 @@ services:
       dockerfile: Dockerfile.ingest
     depends_on:
       - minio
-    restart: "no"
+    environment:
+      MINIO_ACCESS_KEY: minioadmin
+      MINIO_SECRET_KEY: minioadmin
+
+  transform_silver:
+    build:
+      context: .
+      dockerfile: Dockerfile.transform_silver
+    depends_on:
+      - ingest
+    environment:
+      MINIO_ACCESS_KEY: minioadmin
+      MINIO_SECRET_KEY: minioadmin
+    command: python scripts/bronze_to_silver.py
     
 volumes:
   postgres_data:
