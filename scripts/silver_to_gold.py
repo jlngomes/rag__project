@@ -28,54 +28,40 @@ for obj in objects:
 # Junta todas as partes em um único DataFrame
 df_silver = pd.concat(dfs, ignore_index=True)
 
-print("Gerando tabelas para a camada Gold...")
+print("Gerando tabelas unificadas para a camada Gold...")
 
+# --- REGRAS DE NEGÓCIO (Camada Gold - Foco em RAG) ---
 
-# REGRAS DE NEGÓCIO (Camada Gold)
-# TABELA 1: Estatísticas de Dano por Arma
-# Agrupa e soma os danos de vida e colete
-df_gold_weapons = df_silver.groupby('wp').agg(
+# TABELA 1: Estatísticas de Combate Multidimensional
+# Agrupa as principais dimensões: Arma, Patente do Atacante, Local do Acerto e Lado (TR/CT)
+df_gold_combat = df_silver.groupby(['wp', 'att_rank', 'hitbox', 'att_side']).agg(
     total_hp_damage=('hp_dmg', 'sum'),
     total_armor_damage=('arm_dmg', 'sum'),
-    total_shots_hit=('hp_dmg', 'count')
-).reset_index()
-
-# Ordena pelas armas mais destrutivas
-df_gold_weapons = df_gold_weapons.sort_values(by='total_hp_damage', ascending=False)
-
-
-# TABELA 2: Letalidade por Região do Corpo (Hitbox)
-# Agrupa para ver onde os jogadores mais acertam tiros
-df_gold_hitbox = df_silver.groupby('hitbox').agg(
-    total_hp_damage=('hp_dmg', 'sum'),
-    avg_damage_per_hit=('hp_dmg', 'mean'),
-    total_hits=('hp_dmg', 'count')
-).reset_index()
-
-# Ordena pelos locais mais atingidos
-df_gold_hitbox = df_gold_hitbox.sort_values(by='total_hits', ascending=False)
-
-# --- TABELA 3: Desempenho CT vs T ---
-df_gold_side = df_silver.groupby('att_side').agg(
-    total_hp_damage=('hp_dmg', 'sum'),
     avg_hp_damage=('hp_dmg', 'mean'),
-    count_hits=('hp_dmg', 'count')
+    total_hits=('hp_dmg', 'count')
 ).reset_index()
 
-# --- TABELA 4: Letalidade por Rank (Patente) ---
-df_gold_rank = df_silver.groupby('att_rank').agg(
-    avg_damage=('hp_dmg', 'mean'),
-    total_hits=('hp_dmg', 'count')
-).reset_index().sort_values(by='att_rank')
+# Filtro de Relevância (Ruído): 
+# Remove combinações que aconteceram menos de 50 vezes para evitar que a IA 
+# aprenda com pontos fora da curva (outliers estatísticos)
+df_gold_combat = df_gold_combat[df_gold_combat['total_hits'] >= 50]
+df_gold_combat = df_gold_combat.sort_values(by='total_hits', ascending=False)
 
-# --- TABELA 5: Análise de Bomb Site ---
-# Apenas quando a bomba plantada
-df_gold_bomb = df_silver[df_silver['is_bomb_planted'] == True].groupby('bomb_site').agg(
+
+# TABELA 2: Análise de Pressão com Bomba Plantada Multidimensional
+# Filtra apenas momentos pós-plant e agrupa por bomb site, lado e arma
+df_gold_bomb = df_silver[df_silver['is_bomb_planted'] == True].groupby(['bomb_site', 'att_side', 'wp']).agg(
     damage_post_plant=('hp_dmg', 'sum'),
+    avg_damage_post_plant=('hp_dmg', 'mean'),
     hits_post_plant=('hp_dmg', 'count')
 ).reset_index()
 
+# Filtro de Relevância para a bomba 
+df_gold_bomb = df_gold_bomb[df_gold_bomb['hits_post_plant'] >= 10]
+df_gold_bomb = df_gold_bomb.sort_values(by='hits_post_plant', ascending=False)
 
+
+# --- SALVAMENTO NO MINIO ---
 def save_gold_table(df, filename):
     buffer = BytesIO()
     df.to_parquet(buffer, index=False)
@@ -90,10 +76,7 @@ def save_gold_table(df, filename):
     print(f"Tabela salva com sucesso: gold/{filename}")
 
 print("Salvando arquivos no MinIO...")
-save_gold_table(df_gold_weapons, "weapon_stats.parquet")
-save_gold_table(df_gold_hitbox, "hitbox_stats.parquet")
-save_gold_table(df_gold_side, "side_performance.parquet")
-save_gold_table(df_gold_rank, "rank_lethality.parquet")
-save_gold_table(df_gold_bomb, "bomb_site_pressure.parquet")
+save_gold_table(df_gold_combat, "combat_context_stats.parquet")
+save_gold_table(df_gold_bomb, "bomb_context_stats.parquet")
 
-print("Pipeline concluído! Camada Gold gerada.")
+print("Pipeline concluído! Camada Gold multidimensional gerada.")
