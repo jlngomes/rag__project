@@ -1,4 +1,7 @@
-pandas
-pyarrow
-minio
 kagglehub
+pandas
+minio
+pyarrow
+mlflow
+xgboost
+scikit-learn

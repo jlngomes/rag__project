@@ -8,9 +8,19 @@ services:
       POSTGRES_PASSWORD: password
       POSTGRES_DB: db
     ports:
-      - "5432:5432"
+      - "5433:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
+  
+  mlflow:
+    image: python:3.11-slim
+    container_name: mlflow
+    restart: unless-stopped
+    ports:
+      - "5000:5000"
+    volumes:
+      - mlflow_data:/mlruns
+    command: sh -c "pip install mlflow && mlflow server --host 0.0.0.0 --port 5000 --allowed-hosts mlflow,mlflow:5000,localhost,localhost:5000"
 
   minio:
     image: minio/minio:latest
@@ -62,7 +72,24 @@ services:
       MINIO_SECRET_KEY: minioadmin
       MINIO_ENDPOINT: "minio:9000"
     command: python scripts/silver_to_gold.py
+
+  model_training:
+    build:
+      context: .
+      dockerfile: Dockerfile.transform_silver
+    depends_on:
+      transform_gold:
+        condition: service_completed_successfully
+      mlflow:
+        condition: service_started
+    environment:
+      MINIO_ACCESS_KEY: minioadmin
+      MINIO_SECRET_KEY: minioadmin
+      MINIO_ENDPOINT: "minio:9000"
+      MLFLOW_TRACKING_URI: "http://mlflow:5000"
+    command: python scripts/train_model.py
     
 volumes:
   postgres_data:
   minio_data:
+  mlflow_data:
