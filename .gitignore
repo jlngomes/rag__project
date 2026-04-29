@@ -5,6 +5,3 @@ data/*
 *.zip
 
 .venv
-.claude/
-seed_minio.py
-run_pipeline.py
