@@ -11,7 +11,7 @@ services:
       - "5433:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
-  
+
   mlflow:
     image: python:3.11-slim
     container_name: mlflow
@@ -35,7 +35,7 @@ services:
     command: server /data --console-address ":9001"
     volumes:
       - minio_data:/data
-      
+
   ingest:
     build:
       context: .
@@ -45,32 +45,34 @@ services:
     environment:
       MINIO_ACCESS_KEY: minioadmin
       MINIO_SECRET_KEY: minioadmin
-      MINIO_ENDPOINT: "minio:9000"
+      MINIO_ENDPOINT: minio:9000
+      KAGGLE_USERNAME: sebastioneto05
+      KAGGLE_KEY: 668adff75b2763a38ba52a8b4f72dd1f
 
   transform_silver:
     build:
       context: .
       dockerfile: Dockerfile.transform_silver
     depends_on:
-      ingest:                                    
-        condition: service_completed_successfully 
-    environment:
-      MINIO_ACCESS_KEY: minioadmin
-      MINIO_SECRET_KEY: minioadmin
-      MINIO_ENDPOINT: "minio:9000"
-    command: python scripts/bronze_to_silver.py
-
-  transform_gold:
-    build:
-      context: .     
-      dockerfile: Dockerfile.transform_silver 
-    depends_on:
-      transform_silver:                     
+      ingest:
         condition: service_completed_successfully
     environment:
       MINIO_ACCESS_KEY: minioadmin
       MINIO_SECRET_KEY: minioadmin
-      MINIO_ENDPOINT: "minio:9000"
+      MINIO_ENDPOINT: minio:9000
+    command: python scripts/bronze_to_silver.py
+
+  transform_gold:
+    build:
+      context: .
+      dockerfile: Dockerfile.transform_silver
+    depends_on:
+      transform_silver:
+        condition: service_completed_successfully
+    environment:
+      MINIO_ACCESS_KEY: minioadmin
+      MINIO_SECRET_KEY: minioadmin
+      MINIO_ENDPOINT: minio:9000
     command: python scripts/silver_to_gold.py
 
   model_training:
@@ -85,10 +87,10 @@ services:
     environment:
       MINIO_ACCESS_KEY: minioadmin
       MINIO_SECRET_KEY: minioadmin
-      MINIO_ENDPOINT: "minio:9000"
-      MLFLOW_TRACKING_URI: "http://mlflow:5000"
+      MINIO_ENDPOINT: minio:9000
+      MLFLOW_TRACKING_URI: http://mlflow:5000
     command: python scripts/train_model.py
-    
+
 volumes:
   postgres_data:
   minio_data:
