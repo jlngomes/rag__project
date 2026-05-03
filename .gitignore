@@ -4,4 +4,4 @@ data/*
 *.csv
 *.zip
 
-.venv
+.venvmain.py
