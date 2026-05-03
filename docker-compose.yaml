@@ -107,7 +107,43 @@ services:
       MLFLOW_TRACKING_URI: http://mlflow:5000
     command: python scripts/train_bomb_model.py
 
+    # ----------------- SPRINT 5 ----------------- #
+  etcd:
+    image: quay.io/coreos/etcd:v3.5.5
+    container_name: milvus-etcd
+    restart: unless-stopped
+    environment:
+      - ETCD_AUTO_COMPACTION_MODE=revision
+      - ETCD_AUTO_COMPACTION_RETENTION=1000
+      - ETCD_QUOTA_BACKEND_BYTES=4294967296
+      - ETCD_SNAPSHOT_COUNT=50000
+    volumes:  
+      - etcd_data:/etcd
+    command: etcd -advertise-client-urls=http://12.0.0.1:2379 -listen-client-urls http://0.0.0.0:2379 --data-dir /etcd
+
+  milvus:
+    image: milvusdb/milvus:v2.3.5
+    container_name: milvus-standalone
+    restart: unless-stopped
+    command: ["milvus", "run", "standalone"]
+    environment:
+      ETCD_ENDPOINTS: etcd:2379
+      MINIO_ADDRESS: minio:9000
+      MINIO_ACCESS_KEY_ID: minioadmin
+      MINIO_SECRET_ACCESS_KEY: minioadmin
+      MINIO_BUCKET_NAME: milvus-bucket
+    volumes:
+      - milvus_data:/var/lib/milvus
+    ports:
+      - "19530:19530" # Porta principal de conexão do Milvus
+      - "9091:9091"   # Porta para métricas/gerenciamento
+    depends_on:
+      - etcd
+      - minio
+
 volumes:
   postgres_data:
   minio_data:
   mlflow_data:
+  etcd_data: # Volume novo pro Milvus
+  milvus_data: # Volume novo pro Milvus
