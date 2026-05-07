@@ -5,6 +5,7 @@ pyarrow
 mlflow
 xgboost
 scikit-learn
+boto3
 langchain
 langchain-community
 langchain-milvus

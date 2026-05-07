@@ -12,15 +12,37 @@ services:
     volumes:
       - postgres_data:/var/lib/postgresql/data
 
+  minio-init:
+    image: python:3.11-slim
+    container_name: minio-init
+    working_dir: /app
+    depends_on:
+      minio:
+        condition: service_started
+    environment:
+      MINIO_ACCESS_KEY: minioadmin
+      MINIO_SECRET_KEY: minioadmin
+      MINIO_ENDPOINT: minio:9000
+    command: sh -c "pip install minio && python scripts/init_minio.py"
+    volumes:
+      - ./scripts:/app/scripts
+
   mlflow:
     image: python:3.11-slim
     container_name: mlflow
     restart: unless-stopped
     ports:
       - "5000:5000"
-    volumes:
-      - mlflow_data:/mlruns
-    command: sh -c "pip install mlflow && mlflow server --host 0.0.0.0 --port 5000 --allowed-hosts mlflow,mlflow:5000,localhost,localhost:5000"
+    depends_on:
+      minio-init:
+        condition: service_completed_successfully
+      postgres:
+        condition: service_started
+    environment:
+      AWS_ACCESS_KEY_ID: minioadmin
+      AWS_SECRET_ACCESS_KEY: minioadmin
+      MLFLOW_S3_ENDPOINT_URL: http://minio:9000
+    command: sh -c "pip install mlflow psycopg2-binary boto3 && mlflow server --host 0.0.0.0 --port 5000 --backend-store-uri postgresql://postgres:password@postgres:5432/db --default-artifact-root s3://mlflow-artifacts --allowed-hosts mlflow,mlflow:5000,localhost,localhost:5000"
 
   minio:
     image: minio/minio:latest
@@ -41,7 +63,8 @@ services:
       context: .
       dockerfile: Dockerfile.ingest
     depends_on:
-      - minio
+      minio-init:
+        condition: service_completed_successfully
     environment:
       MINIO_ACCESS_KEY: minioadmin
       MINIO_SECRET_KEY: minioadmin
@@ -89,6 +112,9 @@ services:
       MINIO_SECRET_KEY: minioadmin
       MINIO_ENDPOINT: minio:9000
       MLFLOW_TRACKING_URI: http://mlflow:5000
+      AWS_ACCESS_KEY_ID: minioadmin
+      AWS_SECRET_ACCESS_KEY: minioadmin
+      MLFLOW_S3_ENDPOINT_URL: http://minio:9000
     command: python scripts/train_model.py
 
   model_training_bomb:
@@ -105,6 +131,9 @@ services:
       MINIO_SECRET_KEY: minioadmin
       MINIO_ENDPOINT: minio:9000
       MLFLOW_TRACKING_URI: http://mlflow:5000
+      AWS_ACCESS_KEY_ID: minioadmin
+      AWS_SECRET_ACCESS_KEY: minioadmin
+      MLFLOW_S3_ENDPOINT_URL: http://minio:9000
     command: python scripts/train_bomb_model.py
 
     # ----------------- SPRINT 5 ----------------- #

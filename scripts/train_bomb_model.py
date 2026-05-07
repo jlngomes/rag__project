@@ -30,7 +30,7 @@ bucket = "csgodatalake"
 
 # Conexão MLflow
 mlflow.set_tracking_uri(mlflow_uri)
-mlflow.set_experiment("csgo_bomb_damage_prediction")
+mlflow.set_experiment("csgo_damage_prediction")
 
 # ---------------------------------------------------------
 # 2. CARREGAMENTO DOS DADOS (Camada Gold - Bomb Context)
