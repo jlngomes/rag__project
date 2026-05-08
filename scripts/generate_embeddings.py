@@ -6,6 +6,7 @@ from io import BytesIO
 from langchain_ollama import OllamaEmbeddings
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain_core.documents import Document
+from pymilvus import MilvusClient
 
 MINIO_ENDPOINT   = os.getenv("MINIO_ENDPOINT",   "localhost:9000")
 MINIO_ACCESS_KEY = os.getenv("MINIO_ACCESS_KEY",  "minioadmin")
@@ -103,29 +104,8 @@ print(f"   Total após chunking: {len(chunks)} chunks")
 print(f"\n[4/5] Gerando embeddings com '{EMBED_MODEL}' e indexando no Milvus...")
 print("   (Isso pode levar alguns minutos dependendo do volume de dados...)")
 
-# embeddings = OllamaEmbeddings(model=EMBED_MODEL, base_url=OLLAMA_BASE_URL)
-
-# connections.connect(alias="default", uri=MILVUS_URI)
-# if utility.has_collection(COLLECTION_NAME):
-#     utility.drop_collection(COLLECTION_NAME)
-#     print(f"   Coleção '{COLLECTION_NAME}' anterior removida.")
-
-# vector_store = Milvus(
-#     embedding_function=embeddings,
-#     connection_args={"uri": MILVUS_URI},
-#     collection_name=COLLECTION_NAME,
-#     auto_id=True,
-# )
-# vector_store.add_documents(chunks)
-
-# print(f"   {len(chunks)} chunks indexados na coleção '{COLLECTION_NAME}'!")
-# print("\n[5/5] Concluido! Index vetorial pronto para consultas RAG.")
-
-from pymilvus import MilvusClient
-
 embeddings = OllamaEmbeddings(model=EMBED_MODEL, base_url=OLLAMA_BASE_URL)
 
-# Cliente direto (não usa o alias problemático)
 client = MilvusClient(uri=MILVUS_URI)
 
 # Remove coleção se existir
@@ -133,10 +113,10 @@ if client.has_collection(COLLECTION_NAME):
     client.drop_collection(COLLECTION_NAME)
     print(f"   Coleção '{COLLECTION_NAME}' anterior removida.")
 
-# Cria coleção nova com dimensão correta
+# Cria coleção
 client.create_collection(
     collection_name=COLLECTION_NAME,
-    dimension=768,  # dimensão do nomic-embed-text
+    dimension=768,
     metric_type="COSINE",
     auto_id=True
 )
@@ -151,7 +131,7 @@ print(f"   Embeddings gerados: {len(embeddings_list)}")
 
 # Prepara dados para inserção
 data = []
-for i, (text, embedding) in enumerate(zip(texts, embeddings_list)):
+for text, embedding in zip(texts, embeddings_list):
     data.append({
         "text": text,
         "vector": embedding
@@ -159,12 +139,48 @@ for i, (text, embedding) in enumerate(zip(texts, embeddings_list)):
 
 # Insere em lote
 print(f"   Inserindo {len(data)} chunks no Milvus...")
-client.insert(COLLECTION_NAME, data)
-
+insert_result = client.insert(COLLECTION_NAME, data)
 print(f"   ✓ {len(data)} chunks indexados na coleção '{COLLECTION_NAME}'!")
 
-# Verifica se foi inserido corretamente
-count = client.get_collection_stats(COLLECTION_NAME)["row_count"]
-print(f"   ✓ Collection '{COLLECTION_NAME}' tem {count} entidades")
+# Aguarda persistência (pymilvus 2.4.x faz flush automático, só precisa de tempo)
+print("   Aguardando persistência...")
+time.sleep(10)
+
+# Carrega coleção em memória
+client.load_collection(COLLECTION_NAME)
+print("   ✓ Coleção carregada em memória — pronta para queries.")
+
+print("\n   Verificando dados inseridos...")
+try:
+    # Método 1: Tentar buscar registros
+    results = client.query(
+        collection_name=COLLECTION_NAME,
+        filter="id >= 0",
+        output_fields=["id", "text"],
+        limit=5
+    )
+    
+    if results:
+        print(f"   ✓ CONFIRMADO: {len(results)} registros encontrados (amostra)")
+        print(f"   ✓ IDs dos primeiros registros: {[r['id'] for r in results]}")
+    else:
+        print(f"   ⚠️ Query retornou 0 registros")
+        
+    # Método 2: Estatísticas da coleção
+    stats = client.get_collection_stats(COLLECTION_NAME)
+    print(f"   Estatísticas da coleção: {stats}")
+    
+    # Método 3: Contagem via query (mais confiável)
+    count_result = client.query(
+        collection_name=COLLECTION_NAME,
+        filter="id >= 0",
+        output_fields=["id"],
+        limit=10000
+    )
+    print(f"   ✓ Contagem real via query: {len(count_result)} entidades")
+    
+except Exception as e:
+    print(f"   ⚠️ Erro na verificação: {e}")
+    print("   Os dados podem ter sido inseridos mesmo assim.")
 
 print("\n[5/5] Concluido! Index vetorial pronto para consultas RAG.")

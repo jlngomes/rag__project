@@ -31,7 +31,7 @@ SUPPORTED_MODELS = [
 
 # Modelo de embeddings (especializado em busca semântica)
 EMBEDDING_MODEL = "nomic-embed-text"
-COLLECTION_NAME = "csgo_rag_collection"
+COLLECTION_NAME = "csgo_rag"
 
 # ==========================================
 # CLIENTE MINIO

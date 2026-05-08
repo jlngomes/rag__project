@@ -69,8 +69,9 @@ services:
       MINIO_ACCESS_KEY: minioadmin
       MINIO_SECRET_KEY: minioadmin
       MINIO_ENDPOINT: minio:9000
-      KAGGLE_USERNAME: sebastioneto05
-      KAGGLE_KEY: 668adff75b2763a38ba52a8b4f72dd1f
+      KAGGLE_API_TOKEN: ${KAGGLE_API_TOKEN}
+    env_file:
+      - .env
 
   transform_silver:
     build:
@@ -136,7 +137,7 @@ services:
       MLFLOW_S3_ENDPOINT_URL: http://minio:9000
     command: python scripts/train_bomb_model.py
 
-    # ----------------- SPRINT 5 ----------------- #
+  # ----------------- SPRINT 5 ----------------- #
   etcd:
     image: quay.io/coreos/etcd:v3.5.5
     container_name: milvus-etcd
@@ -148,7 +149,7 @@ services:
       - ETCD_SNAPSHOT_COUNT=50000
     volumes:  
       - etcd_data:/etcd
-    command: etcd -advertise-client-urls=http://12.0.0.1:2379 -listen-client-urls http://0.0.0.0:2379 --data-dir /etcd
+    command: etcd -advertise-client-urls=http://127.0.0.1:2379 -listen-client-urls http://0.0.0.0:2379 --data-dir /etcd
 
   milvus:
     image: milvusdb/milvus:v2.3.5
@@ -164,15 +165,89 @@ services:
     volumes:
       - milvus_data:/var/lib/milvus
     ports:
-      - "19530:19530" # Porta principal de conexão do Milvus
-      - "9091:9091"   # Porta para métricas/gerenciamento
+      - "19530:19530"
+      - "9091:9091"
     depends_on:
       - etcd
       - minio
+      - milvus-bucket-init
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9091/healthz"]
+      interval: 30s
+      timeout: 10s
+      retries: 10
+      start_period: 60s
+
+  milvus-bucket-init:
+    image: minio/mc:latest
+    container_name: milvus-bucket-init
+    depends_on:
+      minio:
+        condition: service_started
+    entrypoint: /bin/sh
+    command: |
+      -c "
+      echo 'Aguardando MinIO...';
+      sleep 5;
+      mc alias set myminio http://minio:9000 minioadmin minioadmin;
+      mc mb myminio/milvus-bucket --ignore-existing;
+      echo 'Bucket milvus-bucket criado/verificado';
+      "
+
+  ollama:
+    image: ollama/ollama:0.3.14
+    container_name: ollama
+    restart: unless-stopped
+    ports:
+      - "11434:11434"
+    volumes:
+      - ollama_data:/root/.ollama
+    environment:
+      - OLLAMA_HOST=0.0.0.0
+
+  ollama-setup:
+    image: curlimages/curl:latest
+    container_name: ollama-setup
+    depends_on:
+    - ollama
+    entrypoint: ["sh", "-c"]
+    command:
+      - |
+        echo '=== Aguardando Ollama inicializar ===' &&
+        sleep 15 &&
+        until curl -sf http://ollama:11434/api/tags > /dev/null; do
+          echo 'Aguardando...' && sleep 5
+        done &&
+        echo '=== Baixando nomic-embed-text ===' &&
+        curl -X POST http://ollama:11434/api/pull -H 'Content-Type: application/json' -d '{"name":"nomic-embed-text"}' --max-time 300 &&
+        echo '=== Baixando llama3.2 ===' &&
+        curl -X POST http://ollama:11434/api/pull -H 'Content-Type: application/json' -d '{"name":"llama3.2"}' --max-time 600 &&
+        echo '=== Modelos prontos ==='
+
+  embedding_pipeline:
+    build:
+      context: .
+      dockerfile: Dockerfile.embedding
+    container_name: embedding-pipeline
+    depends_on:
+      ollama-setup:
+        condition: service_completed_successfully
+      milvus:
+        condition: service_healthy
+      transform_gold:
+        condition: service_completed_successfully
+    environment:
+      MINIO_ACCESS_KEY: minioadmin
+      MINIO_SECRET_KEY: minioadmin
+      MINIO_ENDPOINT: minio:9000
+      MILVUS_URI: http://milvus:19530
+      OLLAMA_BASE_URL: http://ollama:11434
+    restart: "no"
 
 volumes:
   postgres_data:
   minio_data:
   mlflow_data:
-  etcd_data: # Volume novo pro Milvus
-  milvus_data: # Volume novo pro Milvus
+  etcd_data:
+  milvus_data:
+  ollama_data:
