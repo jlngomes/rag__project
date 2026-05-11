@@ -1,0 +1,30 @@
+## Perguntas de dano:
+1. Qual arma causa mais dano médio na cabeça?
+2. Qual arma causa mais dano médio no peito?
+3. Qual arma tem mais acertos registrados no dataset?
+4. Qual arma causa mais dano total no jogo?
+5. AK47 causa mais dano que M4A1?
+
+## Sobre ranks:
+6. Jogadores de rank alto causam mais dano com AK47?
+7. Qual rank causa mais dano médio na cabeça?
+8. Existe diferença de dano entre ranks baixos e altos?
+
+## Sobre lados CT e TR:
+9. Qual lado causa mais dano médio com AK47?
+10. Qual arma do lado TR causa mais dano na cabeça?
+11. Qual arma do lado CT causa mais dano no peito?
+12. CT ou TR causa mais dano total no dataset?
+
+## Sobre bomba plantada:
+13. Qual arma causa mais dano após plantar a bomba no site A?
+14. Qual arma causa mais dano após plantar a bomba no site B?
+15. Qual site tem mais dano registrado após a plantação?
+16. Qual lado causa mais dano após plantar a bomba?
+17. Qual arma tem mais acertos pós plantação no site B?
+
+## Perguntas analíticas:
+18. Qual arma é mais eficiente considerando dano médio e total?
+19. Quais armas causam mais dano na perna?
+20. Qual arma causa mais dano médio independente do hitbox?
+

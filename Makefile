@@ -1,19 +1,19 @@
 .PHONY: up down reset logs health ps
 
 up:
-	docker compose up -d
+	docker-compose up -d
 
 down:
-	docker compose down
+	docker-compose down
 
 reset:
-	docker compose down -v
+	docker-compose down -v
 
 ps:
-	docker compose ps
+	docker-compose ps
 
 logs:
-	docker compose logs -f $(s)
+	docker-compose logs -f $(s)
 
 health:
 	@echo "=== MinIO ===" && curl -sf http://localhost:9000/minio/health/live && echo " OK" || echo " FAIL"
