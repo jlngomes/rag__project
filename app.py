@@ -1,12 +1,50 @@
-import gradio as gr
+"""
+Interface Gradio — StrikeMetrics Solutions RAG CS:GO
+Consome a API FastAPI em vez de chamar main.py diretamente.
+"""
 
-from main import SUPPORTED_MODELS, query
+import os
+
+import gradio as gr
+import requests
+
+API_BASE_URL = os.getenv("API_BASE_URL", "http://localhost:8000")
+
+
+def _get_models() -> list[str]:
+    """Busca a lista de modelos disponíveis na API."""
+    try:
+        resp = requests.get(f"{API_BASE_URL}/models", timeout=5)
+        resp.raise_for_status()
+        return resp.json()["models"]
+    except Exception as e:
+        print(f"[app] Erro ao buscar modelos: {e}")
+        return ["llama3.2"]  # fallback
 
 
 def run_query(model_name: str, question: str) -> tuple[str, str]:
+    """Envia a pergunta para a API e retorna (resposta, logs)."""
     if not question.strip():
         return "Por favor, insira uma pergunta antes de enviar.", ""
-    return query(model_name, question)
+
+    try:
+        resp = requests.post(
+            f"{API_BASE_URL}/query",
+            json={"model_name": model_name, "question": question},
+            timeout=120,
+        )
+        resp.raise_for_status()
+        data = resp.json()
+        return data["answer"], data["logs"]
+    except requests.exceptions.Timeout:
+        return "Erro: a API demorou muito para responder (timeout).", ""
+    except requests.exceptions.ConnectionError:
+        return f"Erro: não foi possível conectar à API em {API_BASE_URL}.", ""
+    except Exception as e:
+        return f"Erro inesperado: {e}", ""
+
+
+SUPPORTED_MODELS = _get_models()
 
 
 def clear_all() -> tuple[str, str, str]:
