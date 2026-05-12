@@ -1,0 +1,243 @@
+openapi: 3.0.3
+info:
+  title: StrikeMetrics RAG API
+  description: >
+    API para consultas RAG sobre estatísticas de combate e bomba do CS:GO.
+    Utiliza Milvus como vector store e modelos Ollama locais para geração de respostas.
+  version: 1.0.0
+
+servers:
+  - url: http://localhost:8000
+    description: Servidor local de desenvolvimento
+
+tags:
+  - name: health
+    description: Verificação de saúde da API
+  - name: config
+    description: Configurações e metadados da API
+  - name: rag
+    description: Pipeline RAG — Recuperação e Geração
+  - name: admin
+    description: Operações administrativas (uso com cuidado)
+
+paths:
+
+  /:
+    get:
+      tags:
+        - health
+      summary: Health Check
+      description: Verifica se a API está no ar.
+      operationId: healthCheck
+      responses:
+        "200":
+          description: API funcionando normalmente.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    example: ok
+                  service:
+                    type: string
+                    example: StrikeMetrics RAG API
+
+  /models:
+    get:
+      tags:
+        - config
+      summary: Listar Modelos Disponíveis
+      description: Retorna a lista de modelos Ollama configurados e disponíveis para uso no endpoint `/query`.
+      operationId: listModels
+      responses:
+        "200":
+          description: Lista de modelos retornada com sucesso.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ModelsResponse"
+              example:
+                models:
+                  - llama3.2
+                  - llama3
+                  - mistral
+                  - gemma2
+                  - phi3
+
+  /query:
+    post:
+      tags:
+        - rag
+      summary: Executar Consulta RAG
+      description: >
+        Executa o pipeline RAG completo:
+
+        1. **Recuperação** — busca semântica no Milvus pelos 5 chunks mais relevantes à pergunta.
+
+        2. **Contextualização** — monta um prompt com os chunks recuperados.
+
+        3. **Geração** — envia o prompt ao modelo Ollama selecionado e retorna a resposta em português.
+      operationId: runQuery
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/QueryRequest"
+            examples:
+              combate:
+                summary: Pergunta sobre dano de arma
+                value:
+                  model_name: llama3.2
+                  question: Qual arma causa mais dano médio na cabeça?
+              bomba:
+                summary: Pergunta sobre pós-plant
+                value:
+                  model_name: mistral
+                  question: Qual site da bomba tem mais dano pós-plant?
+      responses:
+        "200":
+          description: Resposta gerada com sucesso pelo pipeline RAG.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/QueryResponse"
+              example:
+                answer: "A AK-47 causa o maior dano médio na cabeça, com 111.3 HP de dano por acerto."
+                logs: |
+                  Iniciando busca vetorial no Milvus...
+                  5 documentos recuperados:
+                    [1] (fonte: combat) Arma: AK-47 | Rank do atacante: Global Elite | Hitbox: head...
+                    [2] (fonte: combat) Arma: AWP | Rank do atacante: Supreme | Hitbox: head...
+                  Gerando resposta com o modelo 'llama3.2' via Ollama...
+                  Resposta gerada com sucesso.
+        "400":
+          description: Modelo inválido ou pergunta vazia.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HTTPError"
+              example:
+                detail: "Modelo 'gpt-4' não suportado. Use GET /models para ver as opções."
+        "422":
+          description: Erro de validação do corpo da requisição.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ValidationError"
+
+  /rebuild-index:
+    post:
+      tags:
+        - admin
+      summary: Reconstruir Índice Vetorial
+      description: >
+        **⚠️ Use com cuidado.**
+
+        Força a reconstrução completa da coleção no Milvus:
+        apaga todos os vetores existentes, recarrega os dados da camada Gold
+        do MinIO, gera novos embeddings via Ollama e reindexa tudo do zero.
+
+        Esse processo pode levar vários minutos dependendo do volume de dados.
+      operationId: rebuildIndex
+      responses:
+        "200":
+          description: Índice reconstruído com sucesso.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RebuildResponse"
+              example:
+                message: Índice vetorial reconstruído com sucesso.
+        "500":
+          description: Erro interno durante a reconstrução.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HTTPError"
+              example:
+                detail: "Connection refused: não foi possível conectar ao MinIO em localhost:9000"
+
+components:
+  schemas:
+
+    QueryRequest:
+      type: object
+      required:
+        - question
+      properties:
+        model_name:
+          type: string
+          default: llama3.2
+          description: Nome do modelo Ollama a ser usado na geração da resposta.
+          enum:
+            - llama3.2
+            - llama3
+            - mistral
+            - gemma2
+            - phi3
+          example: llama3.2
+        question:
+          type: string
+          minLength: 1
+          description: Pergunta em linguagem natural sobre estatísticas de CS:GO.
+          example: Qual arma causa mais dano médio na cabeça?
+
+    QueryResponse:
+      type: object
+      required:
+        - answer
+        - logs
+      properties:
+        answer:
+          type: string
+          description: Resposta gerada pelo LLM com base no contexto recuperado.
+        logs:
+          type: string
+          description: Logs internos do pipeline RAG (documentos recuperados, modelo usado, etc).
+
+    ModelsResponse:
+      type: object
+      required:
+        - models
+      properties:
+        models:
+          type: array
+          items:
+            type: string
+          description: Lista dos modelos Ollama disponíveis.
+
+    RebuildResponse:
+      type: object
+      required:
+        - message
+      properties:
+        message:
+          type: string
+          description: Mensagem de confirmação da operação.
+
+    HTTPError:
+      type: object
+      properties:
+        detail:
+          type: string
+          description: Descrição do erro.
+
+    ValidationError:
+      type: object
+      properties:
+        detail:
+          type: array
+          items:
+            type: object
+            properties:
+              loc:
+                type: array
+                items:
+                  type: string
+              msg:
+                type: string
+              type:
+                type: string
