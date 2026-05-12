@@ -4,6 +4,7 @@ info:
   description: >
     API para consultas RAG sobre estatísticas de combate e bomba do CS:GO.
     Utiliza Milvus como vector store e modelos Ollama locais para geração de respostas.
+    Sprint 7 — AC2.
   version: 1.0.0
 
 servers:
@@ -24,10 +25,8 @@ paths:
 
   /:
     get:
-      tags:
-        - health
+      tags: [health]
       summary: Health Check
-      description: Verifica se a API está no ar.
       operationId: healthCheck
       responses:
         "200":
@@ -37,19 +36,13 @@ paths:
               schema:
                 type: object
                 properties:
-                  status:
-                    type: string
-                    example: ok
-                  service:
-                    type: string
-                    example: StrikeMetrics RAG API
+                  status: { type: string, example: ok }
+                  service: { type: string, example: StrikeMetrics RAG API }
 
   /models:
     get:
-      tags:
-        - config
+      tags: [config]
       summary: Listar Modelos Disponíveis
-      description: Retorna a lista de modelos Ollama configurados e disponíveis para uso no endpoint `/query`.
       operationId: listModels
       responses:
         "200":
@@ -58,27 +51,46 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ModelsResponse"
+
+  /metadata:
+    get:
+      tags: [config]
+      summary: Metadados da API
+      description: >
+        Retorna informações sobre a API: versão, modelos suportados,
+        vector store, embedding model, fontes de dados, endpoints e timestamp.
+      operationId: getMetadata
+      responses:
+        "200":
+          description: Metadados retornados com sucesso.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MetadataResponse"
               example:
-                models:
-                  - llama3.2
-                  - llama3
-                  - mistral
-                  - gemma2
-                  - phi3
+                api_version: "1.0.0"
+                supported_models: [llama3.2, mistral]
+                vector_store: Milvus
+                embedding_model: nomic-embed-text (Ollama)
+                data_sources:
+                  - csgo_combat_stats (Kaggle → MinIO Gold)
+                  - csgo_bomb_stats (Kaggle → MinIO Gold)
+                endpoints: [/, /models, /metadata, /query, /rebuild-index]
+                timestamp: "2025-01-15T14:30:00Z"
 
   /query:
     post:
-      tags:
-        - rag
+      tags: [rag]
       summary: Executar Consulta RAG
       description: >
-        Executa o pipeline RAG completo:
+        Executa o pipeline RAG completo (recuperação → contextualização → geração).
 
-        1. **Recuperação** — busca semântica no Milvus pelos 5 chunks mais relevantes à pergunta.
+        **Validações de input:**
+          - `model_name` deve estar na lista de GET /models
+          - `question` entre 5 e 500 caracteres, com ao menos uma letra
 
-        2. **Contextualização** — monta um prompt com os chunks recuperados.
-
-        3. **Geração** — envia o prompt ao modelo Ollama selecionado e retorna a resposta em português.
+        **Validações de output:**
+          - Resposta gerada não pode ser vazia
       operationId: runQuery
       requestBody:
         required: true
@@ -88,59 +100,51 @@ paths:
               $ref: "#/components/schemas/QueryRequest"
             examples:
               combate:
-                summary: Pergunta sobre dano de arma
+                summary: Dano de arma
                 value:
                   model_name: llama3.2
                   question: Qual arma causa mais dano médio na cabeça?
               bomba:
-                summary: Pergunta sobre pós-plant
+                summary: Pós-plant
                 value:
                   model_name: mistral
                   question: Qual site da bomba tem mais dano pós-plant?
       responses:
         "200":
-          description: Resposta gerada com sucesso pelo pipeline RAG.
+          description: Resposta gerada com sucesso.
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/QueryResponse"
-              example:
-                answer: "A AK-47 causa o maior dano médio na cabeça, com 111.3 HP de dano por acerto."
-                logs: |
-                  Iniciando busca vetorial no Milvus...
-                  5 documentos recuperados:
-                    [1] (fonte: combat) Arma: AK-47 | Rank do atacante: Global Elite | Hitbox: head...
-                    [2] (fonte: combat) Arma: AWP | Rank do atacante: Supreme | Hitbox: head...
-                  Gerando resposta com o modelo 'llama3.2' via Ollama...
-                  Resposta gerada com sucesso.
-        "400":
-          description: Modelo inválido ou pergunta vazia.
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/HTTPError"
-              example:
-                detail: "Modelo 'gpt-4' não suportado. Use GET /models para ver as opções."
         "422":
-          description: Erro de validação do corpo da requisição.
+          description: Erro de validação de input (model_name inválido, question fora do tamanho, etc).
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/ValidationError"
+              examples:
+                modelo_invalido:
+                  summary: Modelo não suportado
+                  value:
+                    detail:
+                      - loc: [body, model_name]
+                        msg: "Modelo 'gpt-4' não suportado."
+                        type: value_error
+                pergunta_curta:
+                  summary: Pergunta muito curta
+                  value:
+                    detail:
+                      - loc: [body, question]
+                        msg: "String should have at least 5 characters"
+                        type: string_too_short
 
   /rebuild-index:
     post:
-      tags:
-        - admin
+      tags: [admin]
       summary: Reconstruir Índice Vetorial
       description: >
-        **⚠️ Use com cuidado.**
-
-        Força a reconstrução completa da coleção no Milvus:
-        apaga todos os vetores existentes, recarrega os dados da camada Gold
-        do MinIO, gera novos embeddings via Ollama e reindexa tudo do zero.
-
-        Esse processo pode levar vários minutos dependendo do volume de dados.
+        Apaga e recria toda a coleção no Milvus a partir dos dados do MinIO Gold.
+        Use com cuidado.
       operationId: rebuildIndex
       responses:
         "200":
@@ -149,81 +153,91 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/RebuildResponse"
-              example:
-                message: Índice vetorial reconstruído com sucesso.
         "500":
-          description: Erro interno durante a reconstrução.
+          description: Erro interno.
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/HTTPError"
-              example:
-                detail: "Connection refused: não foi possível conectar ao MinIO em localhost:9000"
 
 components:
   schemas:
 
     QueryRequest:
       type: object
-      required:
-        - question
+      required: [question]
       properties:
         model_name:
           type: string
           default: llama3.2
-          description: Nome do modelo Ollama a ser usado na geração da resposta.
-          enum:
-            - llama3.2
-            - llama3
-            - mistral
-            - gemma2
-            - phi3
+          description: Modelo Ollama. Deve ser um valor retornado por GET /models.
           example: llama3.2
         question:
           type: string
-          minLength: 1
-          description: Pergunta em linguagem natural sobre estatísticas de CS:GO.
+          minLength: 5
+          maxLength: 500
+          description: Pergunta sobre estatísticas de CS:GO (5–500 chars, ao menos uma letra).
           example: Qual arma causa mais dano médio na cabeça?
 
     QueryResponse:
       type: object
-      required:
-        - answer
-        - logs
+      required: [answer, logs]
       properties:
         answer:
           type: string
-          description: Resposta gerada pelo LLM com base no contexto recuperado.
+          minLength: 1
+          description: Resposta gerada pelo LLM. Nunca será vazia.
         logs:
           type: string
-          description: Logs internos do pipeline RAG (documentos recuperados, modelo usado, etc).
+          description: Logs internos do pipeline RAG.
+
+    MetadataResponse:
+      type: object
+      required: [api_version, supported_models, vector_store, embedding_model, data_sources, endpoints, timestamp]
+      properties:
+        api_version:
+          type: string
+          description: Versão atual da API.
+        supported_models:
+          type: array
+          items: { type: string }
+          description: Modelos Ollama disponíveis.
+        vector_store:
+          type: string
+          description: Tecnologia de vector store utilizada.
+        embedding_model:
+          type: string
+          description: Modelo de embedding utilizado para indexação.
+        data_sources:
+          type: array
+          items: { type: string }
+          description: Fontes de dados indexadas.
+        endpoints:
+          type: array
+          items: { type: string }
+          description: Endpoints disponíveis na API.
+        timestamp:
+          type: string
+          format: date-time
+          description: Data/hora da consulta (ISO 8601 UTC).
 
     ModelsResponse:
       type: object
-      required:
-        - models
+      required: [models]
       properties:
         models:
           type: array
-          items:
-            type: string
-          description: Lista dos modelos Ollama disponíveis.
+          items: { type: string }
 
     RebuildResponse:
       type: object
-      required:
-        - message
       properties:
-        message:
-          type: string
-          description: Mensagem de confirmação da operação.
+        message: { type: string }
 
     HTTPError:
       type: object
       properties:
-        detail:
-          type: string
-          description: Descrição do erro.
+        detail: { type: string }
 
     ValidationError:
       type: object
@@ -235,9 +249,6 @@ components:
             properties:
               loc:
                 type: array
-                items:
-                  type: string
-              msg:
-                type: string
-              type:
-                type: string
+                items: { type: string }
+              msg: { type: string }
+              type: { type: string }

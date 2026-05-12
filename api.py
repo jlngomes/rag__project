@@ -1,19 +1,20 @@
 """
 API FastAPI — StrikeMetrics Solutions RAG CS:GO
-Expõe os endpoints para integração com o app.py (Gradio) e outros clientes.
+Sprint 7 (AC2): /query, /metadata, validação de input/output.
 """
 
 from contextlib import asynccontextmanager
+from datetime import datetime
 
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 from main import SUPPORTED_MODELS, build_vector_store, get_vector_store, query
 
 
 # ==========================================
-# SCHEMAS (Request / Response)
+# SCHEMAS — Input
 # ==========================================
 
 class QueryRequest(BaseModel):
@@ -24,15 +25,56 @@ class QueryRequest(BaseModel):
     )
     question: str = Field(
         ...,
-        min_length=1,
-        description="Pergunta em linguagem natural sobre estatísticas de CS:GO.",
+        min_length=5,
+        max_length=500,
+        description="Pergunta em linguagem natural sobre estatísticas de CS:GO (5–500 caracteres).",
         examples=["Qual arma causa mais dano médio na cabeça?"],
     )
 
+    @field_validator("model_name")
+    @classmethod
+    def validate_model(cls, v: str) -> str:
+        if v not in SUPPORTED_MODELS:
+            raise ValueError(
+                f"Modelo '{v}' não suportado. Modelos disponíveis: {SUPPORTED_MODELS}"
+            )
+        return v
+
+    @field_validator("question")
+    @classmethod
+    def validate_question(cls, v: str) -> str:
+        v = v.strip()
+        if not v:
+            raise ValueError("A pergunta não pode ser composta apenas de espaços.")
+        if not any(c.isalpha() for c in v):
+            raise ValueError("A pergunta deve conter ao menos uma letra.")
+        return v
+
+
+# ==========================================
+# SCHEMAS — Output
+# ==========================================
 
 class QueryResponse(BaseModel):
     answer: str = Field(description="Resposta gerada pelo LLM.")
     logs: str = Field(description="Logs internos do pipeline RAG.")
+
+    @field_validator("answer")
+    @classmethod
+    def answer_not_empty(cls, v: str) -> str:
+        if not v or not v.strip():
+            raise ValueError("O modelo retornou uma resposta vazia.")
+        return v.strip()
+
+
+class MetadataResponse(BaseModel):
+    api_version: str = Field(description="Versão da API.")
+    supported_models: list[str] = Field(description="Modelos Ollama disponíveis.")
+    vector_store: str = Field(description="Tecnologia de vector store utilizada.")
+    embedding_model: str = Field(description="Modelo de embedding utilizado.")
+    data_sources: list[str] = Field(description="Fontes de dados indexadas.")
+    endpoints: list[str] = Field(description="Endpoints disponíveis nesta API.")
+    timestamp: str = Field(description="Data/hora da consulta (ISO 8601).")
 
 
 class RebuildResponse(BaseModel):
@@ -44,7 +86,7 @@ class ModelsResponse(BaseModel):
 
 
 # ==========================================
-# LIFESPAN (warm-up do vector store)
+# LIFESPAN
 # ==========================================
 
 @asynccontextmanager
@@ -65,7 +107,8 @@ app = FastAPI(
     title="StrikeMetrics RAG API",
     description=(
         "API para consultas RAG sobre estatísticas de combate e bomba do CS:GO. "
-        "Utiliza Milvus como vector store e modelos Ollama locais para geração."
+        "Utiliza Milvus como vector store e modelos Ollama locais para geração. "
+        "Sprint 7 — AC2."
     ),
     version="1.0.0",
     lifespan=lifespan,
@@ -73,7 +116,7 @@ app = FastAPI(
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],       # ajuste para seus domínios em produção
+    allow_origins=["*"],
     allow_methods=["*"],
     allow_headers=["*"],
 )
@@ -95,6 +138,26 @@ def list_models():
     return ModelsResponse(models=SUPPORTED_MODELS)
 
 
+@app.get("/metadata", response_model=MetadataResponse, tags=["config"])
+def get_metadata():
+    """
+    Retorna metadados da API: versão, modelos suportados, vector store,
+    modelo de embedding, fontes de dados e endpoints disponíveis.
+    """
+    return MetadataResponse(
+        api_version="1.0.0",
+        supported_models=SUPPORTED_MODELS,
+        vector_store="Milvus",
+        embedding_model="nomic-embed-text (Ollama)",
+        data_sources=[
+            "csgo_combat_stats (Kaggle → MinIO Gold)",
+            "csgo_bomb_stats (Kaggle → MinIO Gold)",
+        ],
+        endpoints=["/", "/models", "/metadata", "/query", "/rebuild-index"],
+        timestamp=datetime.utcnow().isoformat() + "Z",
+    )
+
+
 @app.post("/query", response_model=QueryResponse, tags=["rag"])
 def run_query(body: QueryRequest):
     """
@@ -102,13 +165,10 @@ def run_query(body: QueryRequest):
     1. Busca semântica no Milvus pelos chunks mais relevantes.
     2. Monta o prompt com o contexto recuperado.
     3. Gera a resposta com o modelo Ollama escolhido.
-    """
-    if body.model_name not in SUPPORTED_MODELS:
-        raise HTTPException(
-            status_code=400,
-            detail=f"Modelo '{body.model_name}' não suportado. Use GET /models para ver as opções.",
-        )
 
+    Validações de input: model_name em /models; question entre 5–500 chars.
+    Validações de output: resposta não pode ser vazia.
+    """
     answer, logs = query(body.model_name, body.question)
     return QueryResponse(answer=answer, logs=logs)
 
