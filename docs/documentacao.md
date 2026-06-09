@@ -7,6 +7,26 @@
 - Conta no Kaggle (para download do dataset)
 - Mínimo 16GB RAM e 20GB de espaço em disco
 
+## ⚠️ Atenção — Ollama local
+
+Se você tiver o Ollama instalado diretamente na máquina, ele ocupa a porta 11434 e vai conflitar com o Docker. Pare ele antes de subir o projeto:
+
+```bash
+# Se instalado via sistema:
+sudo systemctl stop ollama
+
+# Se instalado via Snap:
+sudo snap stop ollama
+sudo snap disable ollama
+
+# Confirma que a porta está livre:
+sudo lsof -i :11434
+```
+
+Se não retornar nada, pode continuar.
+
+---
+
 ## 1. Clonar o repositório
 
 ```bash
@@ -16,46 +36,64 @@ cd rag__project
 
 ## 2. Configurar credenciais do Kaggle
 
-Crie o arquivo `.env` na raiz do projeto:
-
 ```bash
 cp .env.example .env
 ```
 
-Edite o `.env` e adicione seu token do Kaggle. Para obter o token: kaggle.com → Account → API → Create New Token.
+Edite o `.env` e adicione seu token do Kaggle:
 
-## 3. Subir a infraestrutura
+```
+KAGGLE_API_TOKEN={"username":"SEU_USUARIO","key":"SUA_CHAVE"}
+```
+
+Para obter o token: kaggle.com → Account → API → Create New Token.
+
+## 3. Subir toda a infraestrutura
 
 ```bash
 make up
 ```
 
-Este comando inicia todos os serviços em ordem:
-- MinIO (object storage)
-- PostgreSQL (metadados e MLflow backend)
-- Milvus + etcd (vector database)
-- Ollama (LLM local)
+Este comando sobe todos os serviços e executa o pipeline automaticamente:
+
+| Serviço | Função | Porta |
+|---------|--------|-------|
+| MinIO | Object storage (Bronze/Silver/Gold) | 9000, 9001 |
+| PostgreSQL | Metadados e MLflow backend | 5433 |
+| Milvus + etcd | Vector database | 19530 |
+| Ollama | LLMs locais | 11434 |
+| MLflow | Rastreamento de experimentos | 5000 |
+| API (FastAPI) | Endpoints RAG | 8000 |
+| Frontend (Gradio) | Interface de usuário | 7860 |
 
 ## 4. Acompanhar o pipeline completo
 
-O pipeline executa automaticamente na seguinte ordem:
+O pipeline executa automaticamente em ordem. Acompanhe cada etapa:
 
 ```bash
-# Acompanhar ingestão do dataset (demora ~7 minutos — download de 600MB)
+# 1. Ingestão do dataset (~7 min — download de 600MB do Kaggle)
 docker logs -f rag__project-ingest-1
 
-# Acompanhar transformação Silver
+# 2. Transformação Silver
 docker logs -f rag__project-transform_silver-1
 
-# Acompanhar transformação Gold
+# 3. Transformação Gold
 docker logs -f rag__project-transform_gold-1
 
-# Acompanhar treinamento dos modelos
+# 4. Treinamento dos modelos ML
 docker logs -f rag__project-model_training-1
 
-# Acompanhar geração de embeddings (demora ~10 minutos em CPU)
+# 5. Download dos modelos Ollama (~2GB na primeira vez)
+docker logs -f ollama-setup
+
+# 6. Geração de embeddings dos dados (~10 min em CPU)
 docker logs -f embedding-pipeline
+
+# 7. API e Frontend sobem automaticamente após o pipeline
+docker logs -f rag-api
 ```
+
+> **Na primeira execução:** o pipeline completo leva entre 30-60 minutos dependendo da internet e do hardware. Nas execuções seguintes, os dados e modelos já estão nos volumes e o sistema sobe em 2-3 minutos.
 
 ## 5. Verificar saúde dos serviços
 
@@ -63,63 +101,92 @@ docker logs -f embedding-pipeline
 make health
 ```
 
-Todos os serviços devem retornar OK.
+Todos os serviços devem retornar OK:
 
-## 6. Verificar dados no MinIO
-
-Acesse: http://localhost:9001
-Usuário: minioadmin
-Senha: minioadmin
-
-Bucket `csgodatalake` deve conter pastas `bronze/`, `silver/` e `gold/`.
-
-## 7. Verificar experimentos no MLflow
-
-Acesse: http://localhost:5000
-
-Deve conter o experimento `csgo_damage_prediction` com 2 runs:
-- XGBoost (R² ~0.97)
-- RandomForest (R² ~0.69)
-
-Os metadados são persistidos no PostgreSQL automaticamente.
-
-## 8. Verificar arquivos na camada Gold (MinIO)
-
-```bash
-docker run --rm --network rag__project_default \
-  --entrypoint sh minio/mc:latest -c \
-  "mc alias set local http://minio:9000 minioadmin minioadmin --quiet && \
-  mc ls local/csgodatalake/gold/"
+```
+=== MinIO ===      OK
+=== PostgreSQL === OK
+=== Milvus ===     OK
+=== Ollama ===     OK
+=== MLflow ===     OK
+=== API ===        OK
+=== Frontend ===   OK
 ```
 
-## 9. Testar o RAG via terminal
-
-Com todos os serviços rodando e o pipeline concluído, instale as dependências caso rode fora do Docker:
+## 6. Executar testes automáticos
 
 ```bash
-pip install pymilvus==2.4.9 requests --break-system-packages
+make test
 ```
 
-Execute o script interativo:
+Valida automaticamente:
+- Buckets Bronze/Silver/Gold no MinIO
+- Coleções `csgo_rag` e `csgo_metadata` no Milvus
+- Endpoints da API (`/`, `/models`, `/metadata`)
+- Runs do MLflow no PostgreSQL
+
+## 7. Acessar a interface
+
+Abra no navegador: **http://localhost:7860**
+
+Exemplos de perguntas sobre CS:GO:
+- `Qual arma causa mais dano médio na cabeça?`
+- `Quais armas causam mais dano pós plantação no site A?`
+- `Qual lado causa mais dano com AK47?`
+
+Exemplos de perguntas sobre o sistema:
+- `Quais modelos foram utilizados no projeto?`
+- `Qual a arquitetura do sistema?`
+- `Como funciona o pipeline de dados?`
+
+## 8. Acessar os serviços de monitoramento
+
+**MinIO Console** — http://localhost:9001
+- Usuário: `minioadmin` | Senha: `minioadmin`
+- Bucket `csgodatalake` deve conter `bronze/`, `silver/` e `gold/`
+
+**MLflow UI** — http://localhost:5000
+- Experimento `csgo_damage_prediction`: XGBoost (R²=0.97) e RandomForest (R²=0.69)
+- Experimento `rag-queries`: queries logadas em tempo real com métricas de latência e relevância
+
+**API Swagger** — http://localhost:8000/docs
+- Documentação interativa de todos os endpoints
+
+## 9. Testar o RAG via terminal (alternativo ao Gradio)
 
 ```bash
+pip install pymilvus==2.4.9 requests marshmallow==3.20.1 --break-system-packages
 python3 scripts/rag_query.py
 ```
 
-Digite perguntas em português sobre estatísticas de CS:GO. Exemplos:
-- `Qual arma causa mais dano médio na cabeça?`
-- `Qual arma do lado TR causa mais dano?`
-- `Quais armas causam mais dano pós plantação no site A?`
-
 Digite `sair` para encerrar.
 
-## 10. Resetar tudo (opcional)
+## 10. Comandos úteis do Makefile
+
+```bash
+make up       # Sobe todos os serviços
+make down     # Para todos os serviços (mantém dados)
+make reset    # Para e apaga todos os volumes ⚠️
+make health   # Verifica saúde de todos os serviços
+make test     # Executa testes automáticos
+make ps       # Lista status dos containers
+make logs s=api  # Logs de um serviço específico
+make query    # RAG interativo no terminal
+make rebuild  # Reconstrói índice vetorial no Milvus
+make metadata # Reindexar metadados de governança
+```
+
+> ⚠️ **NUNCA rode `make reset` antes de uma apresentação.** Apaga todos os volumes e você precisará baixar tudo novamente.
+
+## 11. Resetar tudo (opcional)
 
 ```bash
 make reset
 ```
 
-Este comando apaga todos os volumes e dados. Após isso, volte ao passo 3.
+Apaga todos os volumes e dados. Após isso, volte ao passo 3.
+
+---
 
 ## Arquitetura dos Dados
 
@@ -132,9 +199,18 @@ MinIO Silver (parquet limpo)
     ↓
 MinIO Gold (agregado)
     ↓
-Milvus (embeddings vetoriais)
+Milvus csgo_rag (embeddings dos dados)
+Milvus csgo_metadata (embeddings de governança)
     ↓
-Ollama (respostas em linguagem natural)
+FastAPI (orquestra busca + geração)
     ↓
-MLflow (rastreabilidade — salvo no PostgreSQL)
+Ollama (LLM gera resposta)
+    ↓
+Gradio (interface do usuário)
+    ↓
+MLflow (rastreabilidade salva no PostgreSQL)
 ```
+
+---
+
+*Organização: StrikeMetrics Solutions | Instituição: Facens*
