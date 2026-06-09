@@ -1,16 +1,16 @@
 import os
 import requests
-
 from pymilvus import MilvusClient
 
 # ==========================================
 # CONFIGURAÇÕES
 # ==========================================
 
-OLLAMA_BASE_URL = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434")
-MILVUS_URI = os.getenv("MILVUS_URI", "http://localhost:19530")
-COLLECTION_NAME = "csgo_rag"
-EMBEDDING_MODEL = "nomic-embed-text"
+OLLAMA_BASE_URL  = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434")
+MILVUS_URI       = os.getenv("MILVUS_URI",       "http://localhost:19530")
+COLLECTION_NAME  = "csgo_rag"
+METADATA_COLLECTION = "csgo_metadata"
+EMBEDDING_MODEL  = "nomic-embed-text"
 
 SUPPORTED_MODELS = [
     "llama3.2",
@@ -20,20 +20,29 @@ SUPPORTED_MODELS = [
     "phi3",
 ]
 
+# Palavras que indicam pergunta sobre o sistema
+METADATA_KEYWORDS = [
+    "modelo", "modelos", "arquitetura", "sistema", "api", "endpoint",
+    "pipeline", "tecnologia", "governança", "mlflow", "milvus", "ollama",
+    "gradio", "fastapi", "docker", "bronze", "silver", "gold", "sprint",
+    "projeto", "facens", "dataset", "kaggle", "embedding", "treinamento",
+    "xgboost", "randomforest", "r2", "rmse", "versão", "infraestrutura",
+    "quais modelos", "como funciona", "o que é", "qual tecnologia",
+]
+
 # ==========================================
-# VECTOR STORE (compatível com pymilvus 2.4.x)
+# FUNÇÕES AUXILIARES
 # ==========================================
 
 def get_vector_store():
     return MilvusClient(uri=MILVUS_URI)
 
 def build_vector_store(force_rebuild: bool = False):
-    print("[main] Vector store via pymilvus direto.")
     return get_vector_store()
 
-# ==========================================
-# PIPELINE RAG
-# ==========================================
+def _is_metadata_question(question: str) -> bool:
+    q = question.lower()
+    return any(kw in q for kw in METADATA_KEYWORDS)
 
 def _embed(text: str) -> list:
     translations = {
@@ -53,17 +62,32 @@ def _embed(text: str) -> list:
     resp.raise_for_status()
     return resp.json()["embedding"]
 
+# ==========================================
+# PIPELINE RAG
+# ==========================================
 
 def query(model_name: str, question: str) -> tuple[str, str]:
     logs: list[str] = []
 
     try:
-        logs.append("Iniciando busca vetorial no Milvus...")
         client = MilvusClient(uri=MILVUS_URI)
-
         embedding = _embed(question)
+
+        # Decide qual coleção usar
+        if _is_metadata_question(question):
+            collection = METADATA_COLLECTION
+            logs.append("Buscando em metadados do sistema...")
+        else:
+            collection = COLLECTION_NAME
+            logs.append("Iniciando busca vetorial no Milvus...")
+
+        # Fallback se coleção não existir
+        if not client.has_collection(collection):
+            collection = COLLECTION_NAME
+            logs.append("Coleção de metadados não encontrada, usando dados de CS:GO...")
+
         results = client.search(
-            collection_name=COLLECTION_NAME,
+            collection_name=collection,
             data=[embedding],
             limit=10,
             output_fields=["text"],
@@ -80,10 +104,8 @@ def query(model_name: str, question: str) -> tuple[str, str]:
             logs.append(f"  [{i}] {chunk[:120]}...")
 
         context = "\n".join(chunks)
-        prompt = f"""Você é um assistente especialista em CS:GO.
-Use o contexto abaixo para responder. O contexto contém estatísticas reais de partidas.
-Analise os dados disponíveis e responda com base neles.
-Responda em português, de forma clara e objetiva.
+        prompt = f"""Você é um assistente especialista em CS:GO e no sistema StrikeMetrics Solutions.
+Use o contexto abaixo para responder. Responda em português, de forma clara e objetiva.
 
 CONTEXTO:
 {context}
