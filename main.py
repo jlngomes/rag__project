@@ -70,6 +70,12 @@ def query(model_name: str, question: str) -> tuple[str, str]:
     logs: list[str] = []
 
     try:
+        import mlflow
+        import time as _time
+
+        mlflow.set_tracking_uri(os.getenv("MLFLOW_TRACKING_URI", "http://localhost:5000"))
+        mlflow.set_experiment("rag-queries")
+
         client = MilvusClient(uri=MILVUS_URI)
         embedding = _embed(question)
 
@@ -81,10 +87,11 @@ def query(model_name: str, question: str) -> tuple[str, str]:
             collection = COLLECTION_NAME
             logs.append("Iniciando busca vetorial no Milvus...")
 
-        # Fallback se coleção não existir
         if not client.has_collection(collection):
             collection = COLLECTION_NAME
             logs.append("Coleção de metadados não encontrada, usando dados de CS:GO...")
+
+        start = _time.time()
 
         results = client.search(
             collection_name=collection,
@@ -122,6 +129,28 @@ RESPOSTA:"""
         )
         resp.raise_for_status()
         answer = resp.json()["response"].strip()
+        latency = int((_time.time() - start) * 1000)
+
+        # Relevância simples: proporção de chunks com palavras da pergunta
+        question_words = set(question.lower().split())
+        relevant = sum(
+            1 for c in chunks
+            if any(w in c.lower() for w in question_words if len(w) > 3)
+        )
+        relevance_score = round(relevant / len(chunks), 2) if chunks else 0.0
+
+        # Loga no MLflow
+        try:
+            with mlflow.start_run():
+                mlflow.log_param("model", model_name)
+                mlflow.log_param("collection", collection)
+                mlflow.log_param("question_length", len(question))
+                mlflow.log_metric("latency_ms", latency)
+                mlflow.log_metric("chunks_retrieved", len(chunks))
+                mlflow.log_metric("relevance_score", relevance_score)
+                mlflow.log_param("question", question[:250])
+        except Exception as mlflow_err:
+            logs.append(f"[MLflow] aviso: {mlflow_err}")
 
         logs.append("Resposta gerada com sucesso.")
         return answer, "\n".join(logs)
