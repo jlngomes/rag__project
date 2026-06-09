@@ -112,4 +112,4 @@ with gr.Blocks(title="StrikeMetrics Solutions — RAG CS:GO") as demo:
 
 
 if __name__ == "__main__":
-    demo.launch(theme=gr.themes.Soft())
+    demo.launch(theme=gr.themes.Soft(), server_name="0.0.0.0", server_port=7860)

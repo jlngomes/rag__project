@@ -251,3 +251,43 @@ volumes:
   etcd_data:
   milvus_data:
   ollama_data:
+  # ----------------- API & FRONTEND ----------------- #
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile.api
+    container_name: rag-api
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    depends_on:
+      embedding_pipeline:
+        condition: service_completed_successfully
+      milvus:
+        condition: service_healthy
+    environment:
+      MINIO_ACCESS_KEY: minioadmin
+      MINIO_SECRET_KEY: minioadmin
+      MINIO_ENDPOINT: minio:9000
+      MILVUS_URI: http://milvus:19530
+      OLLAMA_BASE_URL: http://ollama:11434
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+
+  frontend:
+    build:
+      context: .
+      dockerfile: Dockerfile.frontend
+    container_name: rag-frontend
+    restart: unless-stopped
+    ports:
+      - "7860:7860"
+    depends_on:
+      api:
+        condition: service_healthy
+    environment:
+      API_BASE_URL: http://api:8000
