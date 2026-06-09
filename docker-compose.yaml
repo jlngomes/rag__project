@@ -147,7 +147,7 @@ services:
       - ETCD_AUTO_COMPACTION_RETENTION=1000
       - ETCD_QUOTA_BACKEND_BYTES=4294967296
       - ETCD_SNAPSHOT_COUNT=50000
-    volumes:  
+    volumes:
       - etcd_data:/etcd
     command: etcd -advertise-client-urls=http://127.0.0.1:2379 -listen-client-urls http://0.0.0.0:2379 --data-dir /etcd
 
@@ -209,7 +209,7 @@ services:
     image: curlimages/curl:latest
     container_name: ollama-setup
     depends_on:
-    - ollama
+      - ollama
     entrypoint: ["sh", "-c"]
     command:
       - |
@@ -244,14 +244,7 @@ services:
       OLLAMA_BASE_URL: http://ollama:11434
     restart: "no"
 
-volumes:
-  postgres_data:
-  minio_data:
-  mlflow_data:
-  etcd_data:
-  milvus_data:
-  ollama_data:
-  # ----------------- API & FRONTEND ----------------- #
+  # ----------------- SPRINT 7/8 ----------------- #
   api:
     build:
       context: .
@@ -271,6 +264,7 @@ volumes:
       MINIO_ENDPOINT: minio:9000
       MILVUS_URI: http://milvus:19530
       OLLAMA_BASE_URL: http://ollama:11434
+      MLFLOW_TRACKING_URI: http://mlflow:5000
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8000/"]
       interval: 15s
@@ -291,3 +285,11 @@ volumes:
         condition: service_healthy
     environment:
       API_BASE_URL: http://api:8000
+
+volumes:
+  postgres_data:
+  minio_data:
+  mlflow_data:
+  etcd_data:
+  milvus_data:
+  ollama_data:
